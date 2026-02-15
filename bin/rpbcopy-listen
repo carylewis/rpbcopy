@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+#
+# rpbcopy-listen — Local Mac listener that receives clipboard data over the network
+#
+# Usage: rpbcopy-listen [--port PORT] [--daemon]
+
+set -euo pipefail
+
+PORT="${RPBCOPY_PORT:-2000}"
+PASTE_PORT="${RPBPASTE_PORT:-2001}"
+DAEMON=false
+
+usage() {
+    cat <<EOF
+Usage: rpbcopy-listen [OPTIONS]
+
+Start a listener that receives clipboard data from remote machines over SSH.
+
+Options:
+  --port PORT    Port to listen on (default: 2000, or \$RPBCOPY_PORT)
+  --daemon       Run in the background
+  -h, --help     Show this help message
+
+The listener accepts data on the specified port and pipes it into pbcopy.
+A second listener on port+1 (default: 2001) serves clipboard contents via pbpaste.
+EOF
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --port)
+            PORT="$2"
+            PASTE_PORT=$((PORT + 1))
+            shift 2
+            ;;
+        --daemon)
+            DAEMON=true
+            shift
+            ;;
+        -h|--help)
+            usage
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            echo "Run 'rpbcopy-listen --help' for usage." >&2
+            exit 1
+            ;;
+    esac
+done
+
+# Check for socat
+if ! command -v socat &>/dev/null; then
+    echo "Error: socat is not installed." >&2
+    echo "Install it with: brew install socat" >&2
+    exit 1
+fi
+
+# Check for pbcopy (should exist on macOS)
+if ! command -v pbcopy &>/dev/null; then
+    echo "Error: pbcopy not found. This script is meant to run on macOS." >&2
+    exit 1
+fi
+
+start_listener() {
+    echo "rpbcopy: listening for clipboard data on port $PORT"
+    echo "rpbcopy: serving clipboard contents on port $PASTE_PORT"
+    echo "rpbcopy: press Ctrl+C to stop"
+
+    # Start the paste server in the background
+    socat TCP-LISTEN:"$PASTE_PORT",reuseaddr,fork EXEC:'pbpaste' &
+    PASTE_PID=$!
+
+    # Ensure paste server is cleaned up on exit
+    trap "kill $PASTE_PID 2>/dev/null; echo ''; echo 'rpbcopy: listener stopped'" EXIT
+
+    # Start the copy listener (foreground)
+    socat TCP-LISTEN:"$PORT",reuseaddr,fork EXEC:'pbcopy'
+}
+
+if [[ "$DAEMON" == true ]]; then
+    start_listener &>/dev/null &
+    disown
+    echo "rpbcopy: listener started in background (copy=$PORT, paste=$PASTE_PORT)"
+    echo "rpbcopy: stop with: pkill -f 'socat TCP-LISTEN:$PORT'"
+else
+    start_listener
+fi

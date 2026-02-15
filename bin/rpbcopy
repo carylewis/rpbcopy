@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+#
+# rpbcopy — Copy stdin to your local Mac's clipboard over SSH
+#
+# Usage: echo "hello" | rpbcopy
+
+set -euo pipefail
+
+PORT="${RPBCOPY_PORT:-2000}"
+TIMEOUT=5
+
+usage() {
+    cat <<EOF
+Usage: <command> | rpbcopy [OPTIONS]
+
+Copy stdin to your local Mac's clipboard over SSH.
+Reads SSH_CLIENT to find the Mac's IP — no configuration needed.
+
+Options:
+  --port PORT    Port to send to (default: 2000, or \$RPBCOPY_PORT)
+  -h, --help     Show this help message
+
+Examples:
+  echo "hello" | rpbcopy
+  cat file.txt | rpbcopy
+  pwd | rpbcopy
+EOF
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --port)
+            PORT="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            echo "Run 'rpbcopy --help' for usage." >&2
+            exit 1
+            ;;
+    esac
+done
+
+# Check for socat
+if ! command -v socat &>/dev/null; then
+    echo "Error: socat is not installed." >&2
+    echo "Install it with:" >&2
+    if [[ "$(uname)" == "Darwin" ]]; then
+        echo "  brew install socat" >&2
+    else
+        echo "  sudo apt install socat    # Debian/Ubuntu" >&2
+        echo "  sudo yum install socat    # RHEL/CentOS" >&2
+    fi
+    exit 1
+fi
+
+# Get the local Mac's IP from the SSH session
+if [[ -z "${SSH_CLIENT:-}" ]] && [[ -z "${SSH_CONNECTION:-}" ]]; then
+    echo "Error: not in an SSH session (SSH_CLIENT is not set)." >&2
+    echo "rpbcopy sends clipboard data back to your local machine over SSH." >&2
+    echo "It only works when you're connected via SSH." >&2
+    exit 1
+fi
+
+MAC_IP=$(echo "${SSH_CLIENT:-$SSH_CONNECTION}" | awk '{print $1}')
+
+# Handle IPv6 addresses — socat needs brackets
+if [[ "$MAC_IP" == *:* ]]; then
+    MAC_IP="[$MAC_IP]"
+fi
+
+# Send stdin to the Mac's listener
+if ! socat -t "$TIMEOUT" - "TCP:${MAC_IP}:${PORT},connect-timeout=${TIMEOUT}" 2>/dev/null; then
+    echo "Error: could not connect to rpbcopy listener at ${MAC_IP}:${PORT}" >&2
+    echo "" >&2
+    echo "Make sure rpbcopy-listen is running on your Mac:" >&2
+    echo "  rpbcopy-listen" >&2
+    exit 1
+fi

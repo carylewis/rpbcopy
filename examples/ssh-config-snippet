@@ -1,0 +1,14 @@
+# ~/.ssh/config snippet for rpbcopy
+#
+# Optional: Add a LocalCommand to auto-start rpbcopy-listen when you SSH somewhere.
+# This ensures the listener is always running when you need it.
+
+Host *
+    # Uncomment to auto-start the listener on every SSH connection:
+    # PermitLocalCommand yes
+    # LocalCommand rpbcopy-listen --daemon 2>/dev/null
+
+# If you prefer to limit it to specific hosts:
+# Host devbox staging production
+#     PermitLocalCommand yes
+#     LocalCommand rpbcopy-listen --daemon 2>/dev/null
